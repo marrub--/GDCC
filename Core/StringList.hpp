@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 //
-// Copyright (C) 2013-2019 David Hill
+// Copyright (C) 2013-2019 David Hill, 2020 Zoe Elsie Watson
 //
 // See COPYING for license information.
 //
@@ -381,6 +381,7 @@ GDCC_Core_StringList(multiDef, "multiDef")
 GDCC_Core_StringList(net, "net")
 GDCC_Core_StringList(no_init, "no_init")
 GDCC_Core_StringList(nocompact, "nocompact")
+GDCC_Core_StringList(noreturn, "noreturn")
 GDCC_Core_StringList(nowadauthor, "nowadauthor")
 GDCC_Core_StringList(off, "off")
 GDCC_Core_StringList(on, "on")
@@ -525,4 +526,3 @@ GDCC_Core_StringList(TOK_DG_Hash2, "%:%:")
 #undef GDCC_Core_StringList
 
 // EOF
-
