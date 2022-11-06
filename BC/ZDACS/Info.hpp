@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 //
-// Copyright (C) 2013-2019 David Hill
+// Copyright (C) 2013-2022 David Hill
 //
 // See COPYING for license information.
 //
@@ -28,7 +28,7 @@
 #include "../../IR/Code.hpp"
 
 #include "../../Option/Bool.hpp"
-#include "../../Option/Int.hpp"
+#include "../../Option/IntMap.hpp"
 
 #include "../../Target/Addr.hpp"
 #include "../../Target/CallType.hpp"
@@ -47,6 +47,9 @@ namespace GDCC::BC::ZDACS
    //
    class Info : public InfoBase
    {
+   protected:
+      using ScriptTypeMap = Option::IntMap<Core::String, Core::FastU>;
+
    public:
       Info();
 
@@ -59,6 +62,9 @@ namespace GDCC::BC::ZDACS
       static Core::StringOption       InitScriptName;
       static Option::Bool             InitScriptNamed;
       static Option::Int<Core::FastU> InitScriptNumber;
+
+      static ScriptTypeMap ScriptFlags;
+      static ScriptTypeMap ScriptTypes;
 
       static Option::Int<Core::FastU> StaArray;
 
@@ -314,6 +320,9 @@ namespace GDCC::BC::ZDACS
       Core::FastU getSpaceInitiSize(IR::Type const &type);
 
       Core::FastU getStkPtrIdx();
+
+      virtual IR::TypeBase getWordType_Funct(IR::Type_Funct const &type, Core::FastU w);
+      virtual IR::TypeBase getWordType_StrEn(IR::Type_StrEn const &type, Core::FastU w);
 
       bool isCopyArg(IR::Arg const &arg);
 
