@@ -315,6 +315,24 @@ Semantics:
   Acts exactly as _Noreturn does.
 
 ===========================================================
+No Init Delay
+===========================================================
+
+Syntax:
+  attribute-no_init_delay:
+    attribute-no_init_delay-name
+
+  attribute-no_init_delay-name:
+    <no_init_delay>
+    <__no_init_delay>
+
+Semantics:
+  Suppresses the potential implicit delay for static initialization in
+  functions which are automatically executed at startup. As a result, static
+  storage objects may or may not yet be initialized before it executes.
+  Standard library functions shall not be called from such a function.
+
+===========================================================
 Optional Args
 ===========================================================
 
@@ -848,31 +866,35 @@ Conditional Macros
 These may or may not be defined depending on compiler options.
 
 -----------------------------------------------------------
+__GDCC_Engine__*__
+-----------------------------------------------------------
+
+Depending on the --target-engine option, one of the following will be defined
+as 1:
+  __GDCC_Engine__None__
+  __GDCC_Engine__Doominati__
+  __GDCC_Engine__Eternity__
+  __GDCC_Engine__ZDoom__
+  __GDCC_Engine__Zandronum__
+All others are undefined.
+
+-----------------------------------------------------------
 __GDCC_Family__*__
 -----------------------------------------------------------
 
-Depending on the --bc-format and --bc-target options, zero or more of the
-following will be defined as 1:
+Depending on the --target-engine and --target-format options, zero or more of
+the following will be defined as 1:
   __GDCC_Family__ZDACS__
 
 -----------------------------------------------------------
 __GDCC_Format__*__
 -----------------------------------------------------------
 
-Depending on the --bc-format option, one of the following will be defined as 1:
+Depending on the --target-format option, one of the following will be defined
+as 1:
   __GDCC_Format__None__
   __GDCC_Format__ACSE__
-  __GDCC_Format__MgC_NTS__
-All others are undefined.
-
------------------------------------------------------------
-__GDCC_Target__*__
------------------------------------------------------------
-
-Depending on the --bc-target option, one of the following will be defined as 1:
-  __GDCC_Target__None__
-  __GDCC_Target__MageCraft__
-  __GDCC_Target__ZDoom__
+  __GDCC_Format__DGE_NTS__
 All others are undefined.
 
 ###############################################################################
