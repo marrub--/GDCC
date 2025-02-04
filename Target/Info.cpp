@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 //
-// Copyright (C) 2013-2019 David Hill
+// Copyright (C) 2013-2025 David Hill
 //
 // See COPYING for license information.
 //
@@ -30,39 +30,6 @@
 namespace GDCC::Target
 {
    //
-   // --target-engine
-   //
-   static Option::Function EngineOpt
-   {
-      &Core::GetOptionList(), Option::Base::Info()
-         .setName("target-engine")
-         .setGroup("output")
-         .setDescS("Selects target engine.")
-         .setDescL("Selects target engine. This option may affect higher level "
-            "codegen and should be set at all stages of compiling. Valid "
-            "arguments are: Doominati, Eternity, ZDoom, Zandronum."),
-
-      [](Option::Base *, Option::Args const &args) -> std::size_t
-      {
-         if(!args.argC)
-            Option::Exception::Error(args, "argument required");
-
-         if(!std::strcmp(args.argV[0], "Doominati"))
-            EngineCur = Engine::Doominati;
-         else if(!std::strcmp(args.argV[0], "Eternity"))
-            EngineCur = Engine::Eternity;
-         else if(!std::strcmp(args.argV[0], "ZDoom"))
-            EngineCur = Engine::ZDoom;
-         else if(!std::strcmp(args.argV[0], "Zandronum"))
-            EngineCur = Engine::Zandronum;
-         else
-            Option::Exception::Error(args, "argument invalid");
-
-         return 1;
-      }
-   };
-
-   //
    // --target-format
    //
    static Option::Function FormatOpt
@@ -80,10 +47,50 @@ namespace GDCC::Target
          if(!args.argC)
             Option::Exception::Error(args, "argument required");
 
-         if(!std::strcmp(args.argV[0], "ACSE"))
+         if(!std::strcmp(args.argV[0], "ACS0"))
+            FormatCur = Format::ACS0;
+         else if(!std::strcmp(args.argV[0], "ACSE"))
             FormatCur = Format::ACSE;
          else if(!std::strcmp(args.argV[0], "DGE_NTS"))
             FormatCur = Format::DGE_NTS;
+         else
+            Option::Exception::Error(args, "argument invalid");
+
+         return 1;
+      }
+   };
+
+   //
+   // --target-engine
+   //
+   static Option::Function EngineOpt
+   {
+      &Core::GetOptionList(), Option::Base::Info()
+         .setName("target-engine")
+         .setGroup("output")
+         .setDescS("Selects target engine.")
+         .setDescL("Selects target engine. This option may affect higher level "
+            "codegen and should be set at all stages of compiling. Valid "
+            "arguments are: Doominati, Eternity, Hexen, ZDoom, Zandronum."),
+
+      [](Option::Base *, Option::Args const &args) -> std::size_t
+      {
+         if(!args.argC)
+            Option::Exception::Error(args, "argument required");
+
+         auto setFormat = [](Format fmt)
+            {if(!FormatOpt.processed) FormatCur = fmt;};
+
+         if(!std::strcmp(args.argV[0], "Doominati"))
+            EngineCur = Engine::Doominati, setFormat(Format::DGE_NTS);
+         else if(!std::strcmp(args.argV[0], "Eternity"))
+            EngineCur = Engine::Eternity, setFormat(Format::ACSE);
+         else if(!std::strcmp(args.argV[0], "Hexen"))
+            EngineCur = Engine::Hexen, setFormat(Format::ACS0);
+         else if(!std::strcmp(args.argV[0], "ZDoom"))
+            EngineCur = Engine::ZDoom, setFormat(Format::ACSE);
+         else if(!std::strcmp(args.argV[0], "Zandronum"))
+            EngineCur = Engine::Zandronum, setFormat(Format::ACSE);
          else
             Option::Exception::Error(args, "argument invalid");
 
@@ -135,6 +142,7 @@ namespace GDCC::Target
       case Engine::None:      return 8;
       case Engine::Doominati: return 8;
       case Engine::Eternity:  return 32;
+      case Engine::Hexen:     return 32;
       case Engine::ZDoom:     return 32;
       case Engine::Zandronum: return 32;
       }
@@ -151,6 +159,7 @@ namespace GDCC::Target
       {
       case Engine::Doominati:
       case Engine::Eternity:
+      case Engine::Hexen:
       case Engine::ZDoom:
       case Engine::Zandronum:
          switch(call)
@@ -179,6 +188,7 @@ namespace GDCC::Target
       case Engine::None:      return 1;
       case Engine::Doominati: return 4;
       case Engine::Eternity:  return 1;
+      case Engine::Hexen:     return 1;
       case Engine::ZDoom:     return 1;
       case Engine::Zandronum: return 1;
       }
@@ -196,6 +206,7 @@ namespace GDCC::Target
       case Engine::None:      return 32;
       case Engine::Doominati: return 32;
       case Engine::Eternity:  return 32;
+      case Engine::Hexen:     return 32;
       case Engine::ZDoom:     return 32;
       case Engine::Zandronum: return 32;
       }
@@ -213,6 +224,7 @@ namespace GDCC::Target
       case Engine::None:      return 1;
       case Engine::Doominati: return 4;
       case Engine::Eternity:  return 1;
+      case Engine::Hexen:     return 1;
       case Engine::ZDoom:     return 1;
       case Engine::Zandronum: return 1;
       }
@@ -230,6 +242,7 @@ namespace GDCC::Target
       case Engine::None:      return 1;
       case Engine::Doominati: return 4;
       case Engine::Eternity:  return 1;
+      case Engine::Hexen:     return 1;
       case Engine::ZDoom:     return 1;
       case Engine::Zandronum: return 1;
       }
@@ -247,11 +260,41 @@ namespace GDCC::Target
       case Engine::None:      return 1;
       case Engine::Doominati: return 1;
       case Engine::Eternity:  return 1;
+      case Engine::Hexen:     return 1;
       case Engine::ZDoom:     return 1;
       case Engine::Zandronum: return 1;
       }
 
       return 0;
+   }
+
+   //
+   // IsAddrFirst
+   //
+   bool IsAddrFirst(AddrBase addr)
+   {
+      switch(addr)
+      {
+      case AddrBase::GblArr:
+      case AddrBase::HubArr:
+      case AddrBase::LocArr:
+      case AddrBase::ModArr:
+      case AddrBase::Sta:
+         switch(EngineCur)
+         {
+         case Engine::Eternity:
+         case Engine::Hexen:
+         case Engine::ZDoom:
+         case Engine::Zandronum:
+            return true;
+
+         default:
+            return false;
+         }
+
+      default:
+         return false;
+      }
    }
 
    //
@@ -263,6 +306,7 @@ namespace GDCC::Target
       {
       case Engine::Doominati:
       case Engine::Eternity:
+      case Engine::Hexen:
       case Engine::ZDoom:
       case Engine::Zandronum:
          switch(call)
@@ -290,6 +334,7 @@ namespace GDCC::Target
       {
       case Engine::Doominati:
       case Engine::Eternity:
+      case Engine::Hexen:
       case Engine::ZDoom:
       case Engine::Zandronum:
          switch(call)
@@ -320,10 +365,13 @@ namespace GDCC::Target
       case Engine::Eternity:
          return true;
 
+      case Engine::Hexen:
       case Engine::ZDoom:
       case Engine::Zandronum:
          return false;
       }
+
+      return false;
    }
 
    //

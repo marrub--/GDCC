@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 //
-// Copyright (C) 2013-2019 David Hill
+// Copyright (C) 2013-2025 David Hill
 //
 // See COPYING for license information.
 //
@@ -30,6 +30,7 @@ namespace GDCC::Target
       None,
       Doominati,
       Eternity,
+      Hexen,
       ZDoom,
       Zandronum,
    };
@@ -40,6 +41,7 @@ namespace GDCC::Target
    enum class Format
    {
       None,
+      ACS0,
       ACSE,
       DGE_NTS,
    };
@@ -73,6 +75,8 @@ namespace GDCC::Target
    unsigned GetWordBytes();
    unsigned GetWordPoint();
    unsigned GetWordShift();
+
+   bool IsAddrFirst(AddrBase addr);
 
    // Does this type of call require explicit auto pointer propagation?
    bool IsCallAutoProp(CallType call);

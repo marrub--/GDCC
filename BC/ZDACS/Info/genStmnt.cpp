@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 //
-// Copyright (C) 2013-2019 David Hill
+// Copyright (C) 2013-2025 David Hill
 //
 // See COPYING for license information.
 //
@@ -11,6 +11,8 @@
 //-----------------------------------------------------------------------------
 
 #include "BC/ZDACS/Info.hpp"
+
+#include "BC/ZDACS/Module.hpp"
 
 #include "IR/Exception.hpp"
 #include "IR/Program.hpp"
@@ -28,24 +30,12 @@ namespace GDCC::BC::ZDACS
    void Info::genStmnt()
    {
       // Generate label glyphs.
-      if(!stmnt->labs.empty())
-      {
-         auto ip = Core::NumberCast<Core::Integ>(CodeBase() + numChunkCODE);
-         auto val = IR::ExpCreate_Value(
-            IR::Value_Fixed(std::move(ip), TypeWord), stmnt->pos);
-
-         for(auto const &lab : stmnt->labs)
-         {
-            auto &data = prog->getGlyphData(lab);
-
-            data.type  = TypeWord;
-            data.value = val;
-         }
-      }
+      for(auto const &lab : stmnt->labs)
+         backGlyphLabel(lab);
 
       switch(stmnt->code.base)
       {
-      case IR::CodeBase::Nop: numChunkCODE += 4; break;
+      case IR::CodeBase::Nop: genCode(Code::Nop); break;
 
       case IR::CodeBase::Add:      genStmnt_Add(); break;
       case IR::CodeBase::AddX:     genStmnt_AddX(); break;
@@ -62,7 +52,7 @@ namespace GDCC::BC::ZDACS
       case IR::CodeBase::Casm:     genStmnt_Casm(); break;
       case IR::CodeBase::CmpEQ:    genStmnt_CmpEQ(); break;
       case IR::CodeBase::CmpGE:    genStmnt_CmpGE(); break;
-      case IR::CodeBase::CmpGT:    genStmnt_CmpLT(); break;
+      case IR::CodeBase::CmpGT:    genStmnt_CmpGT(); break;
       case IR::CodeBase::CmpLE:    genStmnt_CmpLE(); break;
       case IR::CodeBase::CmpLT:    genStmnt_CmpLT(); break;
       case IR::CodeBase::CmpNE:    genStmnt_CmpNE(); break;
@@ -112,7 +102,10 @@ namespace GDCC::BC::ZDACS
    //
    void Info::genStmnt_Pltn()
    {
-      numChunkCODE += 12;
+      genStmntArgR1Pre(true);
+      genCode(Code::Push_LocReg, getStkPtrIdx());
+      genCode(Code::AddU);
+      genStmntArgR1Suf();
    }
 
    //
@@ -120,16 +113,193 @@ namespace GDCC::BC::ZDACS
    //
    void Info::genStmnt_Xcod_SID()
    {
-     numChunkCODE += 32;
+      if(isInitScriptEvent())
+         return;
+
+      if(isInitiHubArr())
+      {
+         genCode(Code::Push_Lit,    getInitHubIndex());
+         genCode(Code::Push_HubArr, getInitHubArray());
+      }
+      else if(isInitiGblArr())
+      {
+         genCode(Code::Push_Lit,    getInitGblIndex());
+         genCode(Code::Push_GblArr, getInitGblArray());
+      }
+      else
+         return;
+
+      auto jump = module->chunkCODE.size();
+      genCode(Code::Jcnd_Tru, 0);
+      genCode(Code::Wait_Lit, 1);
+      module->chunkCODE[jump].args[0] = getCodePos();
+   }
+
+   //
+   // Info::genStmntArg
+   //
+   void Info::genStmntArg(IR::CodeType type, Code code)
+   {
+      genStmntArg(0, type, code);
+   }
+
+   //
+   // Info::genStmntArg
+   //
+   void Info::genStmntArg(Core::FastU res0, IR::CodeType type, Code code)
+   {
+      auto n = getStmntSize();
+
+      if(n == 0)
+         return genStmntArgN0(res0);
+
+      if(stmnt->args[0].getSize() == 1)
+         return genStmntArgR1(res0, stmnt->code.base+type, code);
+
+      if(stmnt->args[1].a != IR::ArgBase::Stk)
+      {
+         genStmntPushArg(stmnt->args[1]);
+         if(stmnt->args.size() > 2) genStmntPushArg(stmnt->args[2]);
+      }
+
+      if(n == 1 && code != Code::Nop)
+      {
+         genCode(code);
+
+         if(stmnt->args[0].a != IR::ArgBase::Stk)
+            genStmntDropArg(stmnt->args[0]);
+      }
+      else
+         genStmntCall(getFuncName(stmnt->code.base+type, n), stmnt->args[0]);
+   }
+
+   //
+   // Info::genStmntArgN0
+   //
+   void Info::genStmntArgN0(Core::FastU res0)
+   {
+      // TODO 2025-01-10: Handle multi-word result, I guess.
+      if(stmnt->args[0].getSize() == 1)
+      {
+         if(stmnt->args[0].a != IR::ArgBase::Stk)
+            genStmntDropArgPre(stmnt->args[0], 0);
+
+         genCode(Code::Push_Lit, res0);
+
+         if(stmnt->args[0].a != IR::ArgBase::Stk)
+            genStmntDropArgSuf(stmnt->args[0], 0);
+      }
+   }
+
+   //
+   // Info::genStmntArgR1
+   //
+   void Info::genStmntArgR1(Core::FastU res0, IR::Code call, Code code)
+   {
+      auto n = getStmntSize();
+
+      if(n == 0)
+         return genStmntArgN0(res0);
+
+      genStmntArgR1Pre(true);
+
+      if(n == 1 && code != Code::Nop)
+         genCode(code);
+      else
+         genStmntCall(getFuncName(call, n), IR::Arg_Stk{1});
+
+      genStmntArgR1Suf();
+   }
+
+   //
+   // Info::genStmntArgR1Pre
+   //
+   void Info::genStmntArgR1Pre(bool push)
+   {
+      if(stmnt->args[1].a != IR::ArgBase::Stk)
+      {
+         if(stmnt->args[0].a != IR::ArgBase::Stk)
+            genStmntDropArgPre(stmnt->args[0], 0);
+
+         if(push)
+         {
+            genStmntPushArg(stmnt->args[1]);
+            if(stmnt->args.size() > 2) genStmntPushArg(stmnt->args[2]);
+         }
+      }
+   }
+
+   //
+   // Info::genStmntArgR1Suf
+   //
+   void Info::genStmntArgR1Suf()
+   {
+      if(stmnt->args[0].a != IR::ArgBase::Stk)
+      {
+         if(stmnt->args[1].a != IR::ArgBase::Stk)
+            genStmntDropArgSuf(stmnt->args[0], 0);
+         else
+            genStmntDropArg(stmnt->args[0], 0);
+      }
    }
 
    //
    // Info::genStmntCall
    //
-   void Info::genStmntCall(Core::FastU retn)
+   void Info::genStmntCall(Core::String name, Core::FastU retn)
    {
-      numChunkCODE += 8;
+      genCode(retn ? Code::Call_Lit : Code::Call_Nul, getExpGlyph(name));
+      genStmntPushRetn(IR::Arg_Stk{retn}, GetRetnMax(IR::CallType::StkCall));
+   }
+
+   //
+   // Info::genStmntCall
+   //
+   void Info::genStmntCall(Core::String name, IR::Arg const &retn)
+   {
+      genCode(retn.getSize() ? Code::Call_Lit : Code::Call_Nul, getExpGlyph(name));
       genStmntPushRetn(retn, GetRetnMax(IR::CallType::StkCall));
+   }
+
+   //
+   // Info::genStmntDecUArg
+   //
+   void Info::genStmntDecUArg(IR::Arg const &arg, Core::FastU w)
+   {
+      //
+      // genReg
+      //
+      auto genReg = [&](IR::ArgPtr1 const &a, Code code)
+      {
+         genCode(code, getExpAddPtr(a.idx->aLit.value, a.off + w));
+      };
+
+      switch(arg.a)
+      {
+      case IR::ArgBase::GblReg: genReg(arg.aGblReg, Code::DecU_GblReg); break;
+      case IR::ArgBase::HubReg: genReg(arg.aHubReg, Code::DecU_HubReg); break;
+      case IR::ArgBase::LocReg: genReg(arg.aLocReg, Code::DecU_LocReg); break;
+      case IR::ArgBase::ModReg: genReg(arg.aModReg, Code::DecU_ModReg); break;
+
+      default:
+         Core::Error(stmnt->pos, "bad genStmntDecUArg");
+      }
+   }
+
+   //
+   // Info::genStmntDecUTmp
+   //
+   void Info::genStmntDecUTmp(Core::FastU w)
+   {
+      genCode(Code::DecU_LocReg, func->localReg + w);
+   }
+
+   //
+   // Info::genStmntDropArg
+   //
+   void Info::genStmntDropArg(IR::Arg const &arg)
+   {
+      genStmntDropArg(arg, 0, arg.getSize());
    }
 
    //
@@ -137,7 +307,24 @@ namespace GDCC::BC::ZDACS
    //
    void Info::genStmntDropArg(IR::Arg const &arg, Core::FastU w)
    {
-      numChunkCODE += lenDropArg(arg, w);
+      genStmntDropArgPre(arg, w);
+
+      switch(arg.a)
+      {
+      case IR::ArgBase::Aut:
+      case IR::ArgBase::GblArr:
+      case IR::ArgBase::HubArr:
+      case IR::ArgBase::LocArr:
+      case IR::ArgBase::ModArr:
+      case IR::ArgBase::Sta:
+         genCode(Code::Swap);
+         break;
+
+      default:
+         break;
+      }
+
+      genStmntDropArgSuf(arg, w);
    }
 
    //
@@ -145,32 +332,178 @@ namespace GDCC::BC::ZDACS
    //
    void Info::genStmntDropArg(IR::Arg const &arg, Core::FastU lo, Core::FastU hi)
    {
-      numChunkCODE += lenDropArg(arg, lo, hi);
+      while(hi-- != lo)
+         genStmntDropArg(arg, hi);
    }
 
    //
-   // Info::genStmntDropRetn
+   // Info::genStmntDropArgPre
    //
-   void Info::genStmntDropRetn(Core::FastU retn, Core::FastU retnMax)
+   void Info::genStmntDropArgPre(IR::Arg const &arg, Core::FastU w)
    {
-      if(retn > retnMax)
-         numChunkCODE += (retn - retnMax) * 20;
+      //
+      // genArr
+      //
+      auto genArr = [&](IR::ArgPtr2 const &a)
+      {
+         if(a.idx->a == IR::ArgBase::Lit)
+         {
+            genCode(Code::Push_Lit, getExpAddPtr(a.idx->aLit.value, a.off + w));
+         }
+         else
+         {
+            genStmntPushArg(*a.idx, 0);
+
+            if(a.off + w)
+            {
+               genCode(Code::Push_Lit, a.off + w);
+               genCode(Code::AddU);
+            }
+         }
+      };
+
+      //
+      // genAut
+      //
+      auto genAut = [&](IR::Arg_Aut const &a)
+      {
+         if(a.idx->a == IR::ArgBase::Lit)
+         {
+            genCode(Code::Push_Lit,    getExpAddPtr(a.idx->aLit.value, a.off + w));
+            genCode(Code::Push_LocReg, getStkPtrIdx());
+            genCode(Code::AddU);
+         }
+         else
+         {
+            genStmntPushArg(*a.idx, 0);
+
+            genCode(Code::Push_LocReg, getStkPtrIdx());
+            genCode(Code::AddU);
+
+            if(a.off + w)
+            {
+               genCode(Code::Push_Lit, a.off + w);
+               genCode(Code::AddU);
+            }
+         }
+      };
+
+      //
+      // genNul
+      //
+      auto genNul = [&](IR::Arg_Nul const &)
+      {
+      };
+
+      //
+      // genReg
+      //
+      auto genReg = [&](IR::ArgPtr1 const &)
+      {
+      };
+
+      //
+      // genSta
+      //
+      auto genSta = [&](IR::Arg_Sta const &a)
+      {
+         if(a.idx->a == IR::ArgBase::Lit)
+         {
+            genCode(Code::Push_Lit, getExpAddPtr(a.idx->aLit.value, a.off + w));
+         }
+         else
+         {
+            genStmntPushArg(*a.idx, 0);
+
+            if(a.off + w)
+            {
+               genCode(Code::Push_Lit, a.off + w);
+               genCode(Code::AddU);
+            }
+         }
+      };
+
+      switch(arg.a)
+      {
+      case IR::ArgBase::Aut:    genAut(arg.aAut);    break;
+      case IR::ArgBase::GblArr: genArr(arg.aGblArr); break;
+      case IR::ArgBase::GblReg: genReg(arg.aGblReg); break;
+      case IR::ArgBase::HubArr: genArr(arg.aHubArr); break;
+      case IR::ArgBase::HubReg: genReg(arg.aHubReg); break;
+      case IR::ArgBase::LocArr: genArr(arg.aLocArr); break;
+      case IR::ArgBase::LocReg: genReg(arg.aLocReg); break;
+      case IR::ArgBase::ModArr: genArr(arg.aModArr); break;
+      case IR::ArgBase::ModReg: genReg(arg.aModReg); break;
+      case IR::ArgBase::Nul:    genNul(arg.aNul);    break;
+      case IR::ArgBase::Sta:    genSta(arg.aSta);    break;
+
+      default:
+         Core::Error(stmnt->pos, "bad genStmntDropArgPre");
+      }
    }
 
    //
-   // Info::genStmntPushArg
+   // Info::genStmntDropArgSuf
    //
-   void Info::genStmntPushArg(IR::Arg const &arg, Core::FastU w)
+   void Info::genStmntDropArgSuf(IR::Arg const &arg, Core::FastU w)
    {
-      numChunkCODE += lenPushArg(arg, w);
-   }
+      //
+      // genArr
+      //
+      auto genArr = [&](IR::ArgPtr2 const &a, Code code)
+      {
+         genCode(code, a.arr->aLit.value);
+      };
 
-   //
-   // Info::genStmntPushArg
-   //
-   void Info::genStmntPushArg(IR::Arg const &arg, Core::FastU lo, Core::FastU hi)
-   {
-      numChunkCODE += lenPushArg(arg, lo, hi);
+      //
+      // genAut
+      //
+      auto genAut = [&](IR::Arg_Aut const &)
+      {
+         genCode(Code::Drop_GblArr, StaArray);
+      };
+
+      //
+      // genNul
+      //
+      auto genNul = [&](IR::Arg_Nul const &)
+      {
+         genCode(Code::Drop_Nul);
+      };
+
+      //
+      // genReg
+      //
+      auto genReg = [&](IR::ArgPtr1 const &a, Code code)
+      {
+         genCode(code, getExpAddPtr(a.idx->aLit.value, a.off + w));
+      };
+
+      //
+      // genSta
+      //
+      auto genSta = [&](IR::Arg_Sta const &)
+      {
+         genCode(Code::Drop_GblArr, StaArray);
+      };
+
+      switch(arg.a)
+      {
+      case IR::ArgBase::Aut:    genAut(arg.aAut);                       break;
+      case IR::ArgBase::GblArr: genArr(arg.aGblArr, Code::Drop_GblArr); break;
+      case IR::ArgBase::GblReg: genReg(arg.aGblReg, Code::Drop_GblReg); break;
+      case IR::ArgBase::HubArr: genArr(arg.aHubArr, Code::Drop_HubArr); break;
+      case IR::ArgBase::HubReg: genReg(arg.aHubReg, Code::Drop_HubReg); break;
+      case IR::ArgBase::LocArr: genArr(arg.aLocArr, Code::Drop_LocArr); break;
+      case IR::ArgBase::LocReg: genReg(arg.aLocReg, Code::Drop_LocReg); break;
+      case IR::ArgBase::ModArr: genArr(arg.aModArr, Code::Drop_ModArr); break;
+      case IR::ArgBase::ModReg: genReg(arg.aModReg, Code::Drop_ModReg); break;
+      case IR::ArgBase::Nul:    genNul(arg.aNul);                       break;
+      case IR::ArgBase::Sta:    genSta(arg.aSta);                       break;
+
+      default:
+         Core::Error(stmnt->pos, "bad genStmntDropArgSuf");
+      }
    }
 
    //
@@ -178,48 +511,390 @@ namespace GDCC::BC::ZDACS
    //
    void Info::genStmntDropParam(Core::FastU param, Core::FastU paramMax)
    {
-      genStmntDropRetn(param, paramMax);
+      genStmntDropRetn(IR::Arg_Stk{param}, paramMax);
+   }
+
+   //
+   // Info::genStmntDropRetn
+   //
+   void Info::genStmntDropRetn(IR::Arg const &retn, Core::FastU retnMax)
+   {
+      Core::FastU retnSize = retn.getSize();
+
+      if(retn.a == IR::ArgBase::Stk)
+      {
+         if(retnSize > retnMax) for(Core::FastU i = retnSize - retnMax; i--;)
+         {
+            genCode(Code::Push_Lit, ~i);
+            genCode(Code::Swap);
+            genCode(Code::Drop_GblArr, StaArray);
+         }
+      }
+      else
+      {
+         if(retnSize > retnMax) for(Core::FastU i = retnMax; i != retnSize; ++i)
+         {
+            genCode(Code::Push_Lit, ~(i - retnMax));
+            genStmntPushArg(retn, i);
+            genCode(Code::Drop_GblArr, StaArray);
+         }
+
+         for(Core::FastU i = 0, e = std::min(retnSize, retnMax); i != e; ++i)
+            genStmntPushArg(retn, i);
+      }
+   }
+
+   //
+   // Info::genStmntDropTmp
+   //
+   void Info::genStmntDropTmp(Core::FastU w)
+   {
+      genCode(Code::Drop_LocReg, func->localReg + w);
+   }
+
+   //
+   // Info::genStmntIncUArg
+   //
+   void Info::genStmntIncUArg(IR::Arg const &arg, Core::FastU w)
+   {
+      //
+      // genReg
+      //
+      auto genReg = [&](IR::ArgPtr1 const &a, Code code)
+      {
+         genCode(code, getExpAddPtr(a.idx->aLit.value, a.off + w));
+      };
+
+      switch(arg.a)
+      {
+      case IR::ArgBase::GblReg: genReg(arg.aGblReg, Code::IncU_GblReg); break;
+      case IR::ArgBase::HubReg: genReg(arg.aHubReg, Code::IncU_HubReg); break;
+      case IR::ArgBase::LocReg: genReg(arg.aLocReg, Code::IncU_LocReg); break;
+      case IR::ArgBase::ModReg: genReg(arg.aModReg, Code::IncU_ModReg); break;
+
+      default:
+         Core::Error(stmnt->pos, "bad genStmntIncUArg");
+      }
+   }
+
+   //
+   // Info::genStmntIncUTmp
+   //
+   void Info::genStmntIncUTmp(Core::FastU w)
+   {
+      genCode(Code::IncU_LocReg, func->localReg + w);
+   }
+
+   //
+   // Info::genStmntPushArg
+   //
+   void Info::genStmntPushArg(IR::Arg const &arg)
+   {
+      genStmntPushArg(arg, 0, arg.getSize());
+   }
+
+   //
+   // Info::genStmntPushArg
+   //
+   void Info::genStmntPushArg(IR::Arg const &arg, Core::FastU w)
+   {
+      //
+      // genArr
+      //
+      auto genArr = [&](IR::ArgPtr2 const &a, Code code)
+      {
+         if(a.idx->a == IR::ArgBase::Lit)
+         {
+            genCode(Code::Push_Lit, getExpAddPtr(a.idx->aLit.value, a.off + w));
+            genCode(code,           a.arr->aLit.value);
+         }
+         else
+         {
+            genStmntPushArg(*a.idx, 0);
+
+            if(a.off + w)
+            {
+               genCode(Code::Push_Lit, a.off + w);
+               genCode(Code::AddU);
+            }
+
+            genCode(code, a.arr->aLit.value);
+         }
+      };
+
+      //
+      // genAut
+      //
+      auto genAut = [&](IR::Arg_Aut const &a)
+      {
+         if(a.idx->a == IR::ArgBase::Lit)
+         {
+            genCode(Code::Push_Lit,    getExpAddPtr(a.idx->aLit.value, a.off + w));
+            genCode(Code::Push_LocReg, getStkPtrIdx());
+            genCode(Code::AddU);
+            genCode(Code::Push_GblArr, StaArray);
+         }
+         else
+         {
+            genStmntPushArg(*a.idx, 0);
+
+            genCode(Code::Push_LocReg, getStkPtrIdx());
+            genCode(Code::AddU);
+
+            if(a.off + w)
+            {
+               genCode(Code::Push_Lit, a.off + w);
+               genCode(Code::AddU);
+            }
+
+            genCode(Code::Push_GblArr, StaArray);
+         }
+      };
+
+      //
+      // genLit
+      //
+      auto genLit = [&](IR::Arg_Lit const &a)
+      {
+         auto wOff = a.off + w;
+
+         switch(getWordType(a.value->getType(), wOff))
+         {
+         case IR::ValueBase::Funct: genStmntPushFunct(a.value, wOff); break;
+         case IR::ValueBase::StrEn: genStmntPushStrEn(a.value, wOff); break;
+         default: genCode(Code::Push_Lit, {a.value, wOff}); break;
+         }
+      };
+
+      //
+      // genReg
+      //
+      auto genReg = [&](IR::ArgPtr1 const &a, Code code)
+      {
+         genCode(code, getExpAddPtr(a.idx->aLit.value, a.off + w));
+      };
+
+      //
+      // genSta
+      //
+      auto genSta = [&](IR::Arg_Sta const &a)
+      {
+         if(a.idx->a == IR::ArgBase::Lit)
+         {
+            genCode(Code::Push_Lit,    getExpAddPtr(a.idx->aLit.value, a.off + w));
+            genCode(Code::Push_GblArr, StaArray);
+         }
+         else
+         {
+            genStmntPushArg(*a.idx, 0);
+
+            if(a.off + w)
+            {
+               genCode(Code::Push_Lit, a.off + w);
+               genCode(Code::AddU);
+            }
+
+            genCode(Code::Push_GblArr, StaArray);
+         }
+      };
+
+      switch(arg.a)
+      {
+      case IR::ArgBase::Aut:    genAut(arg.aAut); break;
+      case IR::ArgBase::GblArr: genArr(arg.aGblArr, Code::Push_GblArr); break;
+      case IR::ArgBase::GblReg: genReg(arg.aGblReg, Code::Push_GblReg); break;
+      case IR::ArgBase::HubArr: genArr(arg.aHubArr, Code::Push_HubArr); break;
+      case IR::ArgBase::HubReg: genReg(arg.aHubReg, Code::Push_HubReg); break;
+      case IR::ArgBase::Lit:    genLit(arg.aLit); break;
+      case IR::ArgBase::LocArr: genArr(arg.aLocArr, Code::Push_LocArr); break;
+      case IR::ArgBase::LocReg: genReg(arg.aLocReg, Code::Push_LocReg); break;
+      case IR::ArgBase::ModArr: genArr(arg.aModArr, Code::Push_ModArr); break;
+      case IR::ArgBase::ModReg: genReg(arg.aModReg, Code::Push_ModReg); break;
+      case IR::ArgBase::Sta:    genSta(arg.aSta); break;
+
+      default:
+         Core::Error(stmnt->pos, "bad genStmntPushArg ", arg.a);
+      }
+   }
+
+   //
+   // Info::genStmntPushArg
+   //
+   void Info::genStmntPushArg(IR::Arg const &arg, Core::FastU lo, Core::FastU hi)
+   {
+      for(; lo != hi; ++lo)
+         genStmntPushArg(arg, lo);
+   }
+
+   //
+   // Info::genStmntPushFunct
+   //
+   void Info::genStmntPushFunct(Core::FastU value)
+   {
+      genCode(IsNull_Funct(value) ? Code::Push_Lit : Code::Pfun_Lit, value);
+   }
+
+   //
+   // Info::genStmntPushFunct
+   //
+   void Info::genStmntPushFunct(IR::Exp const *value, Core::FastU w)
+   {
+      genCode(isNull_Funct(value, w) ? Code::Push_Lit : Code::Pfun_Lit, {value, w});
+   }
+
+   //
+   // Info::genStmntPushIdx
+   //
+   void Info::genStmntPushIdx(IR::Arg const &arg, Core::FastU w)
+   {
+      //
+      // genSta
+      //
+      auto genSta = [&](IR::Arg_Sta const &a)
+      {
+         if(a.idx->a == IR::ArgBase::Lit)
+         {
+            genCode(Code::Push_Lit, getExpAddPtr(a.idx->aLit.value, a.off + w));
+         }
+         else
+         {
+            genStmntPushArg(*a.idx, 0);
+
+            if(a.off + w)
+            {
+               genCode(Code::Push_Lit, a.off + w);
+               genCode(Code::AddU);
+            }
+         }
+      };
+
+      switch(arg.a)
+      {
+      case IR::ArgBase::Sta: genSta(arg.aSta); break;
+
+      default:
+         Core::Error(stmnt->pos, "bad genStmntPushIdx");
+      }
    }
 
    //
    // Info::genStmntPushRetn
    //
-   void Info::genStmntPushRetn(Core::FastU retn, Core::FastU retnMax)
+   void Info::genStmntPushRetn(IR::Arg const &retn, Core::FastU retnMax)
    {
-      if(retn > retnMax)
-         numChunkCODE += (retn - retnMax) * 16;
+      genStmntPushRetn(retn, retnMax, 0, retn.getSize());
    }
 
    //
-   // Info::genStmntStkBin
+   // Info::genStmntPushRetn
    //
-   void Info::genStmntStkBin(Code code)
+   void Info::genStmntPushRetn(IR::Arg const &retn, Core::FastU retnMax,
+      Core::FastU retnLo, Core::FastU retnHi)
    {
-      auto n = getStmntSize();
-
-      if(n == 0)
-         return;
-
-      if(n == 1 && code != Code::Nop)
-         return (void)(numChunkCODE += 4);
-
-      genStmntCall(stmnt->args[0].getSize());
+      if(retn.a == IR::ArgBase::Stk)
+      {
+         for(Core::FastU retnIdx = retnLo; retnIdx != retnHi; ++retnIdx)
+         {
+            if(retnIdx >= retnMax)
+            {
+               genCode(Code::Push_Lit,    ~(retnIdx - retnMax));
+               genCode(Code::Push_GblArr, StaArray);
+            }
+         }
+      }
+      else
+      {
+         for(Core::FastU retnIdx = retnHi; retnIdx-- != retnLo;)
+         {
+            if(retnIdx >= retnMax)
+            {
+               genStmntDropArgPre(retn, retnIdx - retnLo);
+               genCode(Code::Push_Lit,    ~(retnIdx - retnMax));
+               genCode(Code::Push_GblArr, StaArray);
+               genStmntDropArgSuf(retn, retnIdx - retnLo);
+            }
+            else
+               genStmntDropArg(retn, retnIdx - retnLo);
+         }
+      }
    }
 
    //
-   // Info::genStmntStkCmp
+   // Info::genStmntPushRetnDiv
    //
-   void Info::genStmntStkCmp(Code code)
+   void Info::genStmntPushRetnDiv(IR::Arg const &retn, Core::FastU retnMax)
    {
-      auto n = getStmntSize();
+      Core::FastU retnSize = retn.getSize();
 
-      if(n == 0)
-         return (void)(numChunkCODE += 8);
+      if(retnSize < retnMax)
+         for(Core::FastU i = std::min(retnSize, retnMax - retnSize); i--;)
+            genCode(Code::Drop_Nul);
 
-      if(n == 1 && code != Code::Nop)
-         return (void)(numChunkCODE += 4);
+      genStmntPushRetn(retn, retnMax, 0, retnSize);
+   }
 
-      genStmntCall(stmnt->args[0].getSize());
+   //
+   // Info::genStmntPushRetnMod
+   //
+   void Info::genStmntPushRetnMod(IR::Arg const &retn, Core::FastU retnMax)
+   {
+      Core::FastU retnSize = retn.getSize();
+
+      if(retn.a == IR::ArgBase::Stk)
+      {
+         Core::FastU retnTmp =
+            retnSize < retnMax ? std::min(retnSize, retnMax - retnSize) : 0;
+
+         // Save desired words that are on the stack.
+         for(Core::FastU i = retnTmp; i--;)
+            genStmntDropTmp(i);
+
+         // Discard undesired words that are on the stack.
+         for(Core::FastU i = std::min(retnSize, retnMax); i--;)
+            genCode(Code::Drop_Nul);
+
+         // Push desired words that were saved.
+         for(Core::FastU i = 0; i != retnTmp; ++i)
+            genStmntPushTmp(i);
+
+         // Push desired words that were not on stack.
+         genStmntPushRetn(retn, retnMax, retnSize + retnTmp, retnSize * 2);
+      }
+      else
+      {
+         genStmntPushRetn(retn, retnMax, retnSize, retnSize * 2);
+
+         for(Core::FastU i = std::min(retnSize, retnMax); i--;)
+            genCode(Code::Drop_Nul);
+      }
+   }
+
+   //
+   // Info::genStmntPushStrEn
+   //
+   void Info::genStmntPushStrEn(Core::FastU value)
+   {
+      genCode(Code::Push_Lit, value);
+      if(!IsNull_StrEn(value))
+         genCode(Code::Pstr_Stk);
+   }
+
+   //
+   // Info::genStmntPushStrEn
+   //
+   void Info::genStmntPushStrEn(IR::Exp const *value, Core::FastU w)
+   {
+      genCode(Code::Push_Lit, {value, w});
+      if(!isNull_StrEn(value, w))
+         genCode(Code::Pstr_Stk);
+   }
+
+   //
+   // Info::genStmntPushTmp
+   //
+   void Info::genStmntPushTmp(Core::FastU w)
+   {
+      genCode(Code::Push_LocReg, func->localReg + w);
    }
 }
 

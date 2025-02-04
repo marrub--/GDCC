@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 //
-// Copyright (C) 2013-2019 David Hill
+// Copyright (C) 2013-2024 David Hill
 //
 // See COPYING for license information.
 //
@@ -510,6 +510,7 @@ namespace GDCC::CPP
       switch(Target::FormatCur)
       {
          TargetCase(Format, None);
+         TargetCase(Format, ACS0);
          TargetCase(Format, ACSE);
          TargetCase(Format, DGE_NTS);
       }
@@ -520,6 +521,7 @@ namespace GDCC::CPP
          TargetCase(Engine, None);
          TargetCase(Engine, Doominati);
          TargetCase(Engine, Eternity);
+         TargetCase(Engine, Hexen);
          TargetCase(Engine, ZDoom);
          TargetCase(Engine, Zandronum);
       }

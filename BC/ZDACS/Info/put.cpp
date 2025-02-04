@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 //
-// Copyright (C) 2013-2019 David Hill
+// Copyright (C) 2013-2024 David Hill
 //
 // See COPYING for license information.
 //
@@ -13,10 +13,13 @@
 #include "BC/ZDACS/Info.hpp"
 
 #include "BC/ZDACS/Code.hpp"
+#include "BC/ZDACS/Module.hpp"
 
 #include "IR/Function.hpp"
+#include "IR/Program.hpp"
 
 #include "Target/CallType.hpp"
+#include "Target/Info.hpp"
 
 
 //----------------------------------------------------------------------------|
@@ -29,6 +32,82 @@ namespace GDCC::BC::ZDACS
    // Info::put
    //
    void Info::put()
+   {
+      if(Target::FormatCur == Target::Format::ACS0)
+         putACS0();
+      else
+         putACSE();
+   }
+
+   //
+   // Info::putACS0
+   //
+   void Info::putACS0()
+   {
+      putData("ACS\0", 4);
+      putWord(16 + module->chunkCODE.getPos());
+
+      // <shamelessplug>
+      putData("GDCC::BC", 8);
+      // </shamelessplug>
+
+      putACS0_Code();
+      putACS0_Scripts();
+      putACS0_Strings();
+   }
+
+   //
+   // Info::putACS0_Code
+   //
+   void Info::putACS0_Code()
+   {
+      putCode();
+   }
+
+   //
+   // Info::putACS0_Scripts
+   //
+   void Info::putACS0_Scripts()
+   {
+      // Write script count.
+      putWord(module->chunkSPTR.size());
+
+      // Write script headers.
+      for(auto const &elem : module->chunkSPTR)
+      {
+         // Write entry.
+         putWord(elem.value + elem.stype * 1000);
+         putWord(getWord(elem.entry));
+         putWord(elem.param);
+      }
+   }
+
+   //
+   // Info::putACS0_Strings
+   //
+   void Info::putACS0_Strings()
+   {
+      // Write string count.
+      auto elemC = module->chunkSTRL.size();
+      putWord(elemC);
+
+      // Write string offsets.
+      std::size_t off = putPos + elemC * 4;
+      for(auto const &elem : module->chunkSTRL)
+      {
+         putWord(off);
+         off += lenString(elem.value);
+      }
+
+      // Write strings.
+      for(auto const &elem : module->chunkSTRL)
+         putString(elem.value);
+   }
+
+   //
+   // Info::putACSE
+   //
+   void Info::putACSE()
    {
       // Put header.
       if(UseFakeACS0)
@@ -54,7 +133,7 @@ namespace GDCC::BC::ZDACS
       {
          putWord(16);
          putData("ACSE", 4);
-         putWord(0);
+         putACS0_Scripts();
          putWord(0);
       }
    }
@@ -72,55 +151,51 @@ namespace GDCC::BC::ZDACS
    //
    // Info::putCode
    //
-   void Info::putCode(Code code)
+   void Info::putCode()
    {
-      putWord(static_cast<Core::FastU>(code));
-   }
-
-   //
-   // Info::putCode
-   //
-   void Info::putCode(Code code, Core::FastU arg0)
-   {
-      putCode(code);
-      putWord(arg0);
-   }
-
-   //
-   // Info::putCode
-   //
-   void Info::putCode(Code code, Core::FastU arg0, Core::FastU arg1)
-   {
-      putCode(code);
-      putWord(arg0);
-      putWord(arg1);
-   }
-
-   //
-   // Info::putFunc
-   //
-   void Info::putFunc()
-   {
-      // Put function preamble.
-      if(func->defin && func->allocAut)
+      for(auto &code : module->chunkCODE) switch(static_cast<Code>(code.code))
       {
-         putCode(Code::Push_Lit,    func->allocAut);
-         putCode(Code::Call_Lit,    getWord(resolveGlyph("___GDCC__Plsa")));
-         putCode(Code::Drop_LocReg, getStkPtrIdx());
-      }
+      case Code::Jcnd_Tab:
+         putWord(code.code);
+         putWord(getWord(code.args[0]));
 
-      Core::FastU paramMax = GetParamMax(func->ctype);
-      if(func->defin && func->param > paramMax)
-      {
-         for(Core::FastU i = paramMax; i != func->param; ++i)
+         // Sort and write case data.
          {
-            putCode(Code::Push_Lit,    ~(i - paramMax));
-            putCode(Code::Push_GblArr, StaArray);
-            putCode(Code::Drop_LocReg, i);
-         }
-      }
+            using Case = std::pair<Core::FastU, Core::FastU>;
 
-      InfoBase::putFunc();
+            Core::Array<Case> cases{code.args.size() / 2};
+            auto const *arg = &code.args[1];
+            for(auto &c : cases)
+            {
+               c.first  = getWord(*arg++);
+               c.second = getWord(*arg++);
+            }
+
+            // Sort by value as signed.
+            std::sort(cases.begin(), cases.end(),
+               [](Case const &l, Case const &r)
+               {
+                  if(l.first & 0x80000000)
+                     return r.first & 0x80000000 ? l.first < r.first : true;
+                  else
+                     return r.first & 0x80000000 ? false : l.first < r.first;
+               });
+
+            for(auto const &c : cases)
+            {
+               putWord(c.first);
+               putWord(c.second);
+            }
+         }
+
+         break;
+
+      default:
+         putWord(code.code);
+         for(auto const &arg : code.args)
+            putWord(getWord(arg));
+         break;
+      }
    }
 
    //

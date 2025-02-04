@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 //
-// Copyright (C) 2013-2018 David Hill
+// Copyright (C) 2013-2025 David Hill
 //
 // See COPYING for license information.
 //
@@ -89,13 +89,16 @@ namespace GDCC::Core
    class ExceptStringU : public Exception
    {
    public:
+      ExceptStringU(ExceptStringU const &e) :
+         Exception{e}, str{StrDup(e.str.get())} {}
+      ExceptStringU(ExceptStringU &&) = default;
       ExceptStringU(Origin pos_, std::unique_ptr<char[]> &&str_) noexcept :
          Exception{pos_}, str{std::move(str_)} {}
 
    protected:
       virtual char const *whatGen() const noexcept;
 
-      std::unique_ptr<char[]> const str;
+      std::unique_ptr<char[]> str;
    };
 
    //

@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 //
-// Copyright (C) 2014-2019 David Hill
+// Copyright (C) 2014-2025 David Hill
 //
 // See COPYING for license information.
 //
@@ -43,16 +43,6 @@ namespace GDCC::BC::ZDACS
    GDCC_BC_CodeTypeSwitchFn(pre, CmpLE, FIU)
    GDCC_BC_CodeTypeSwitchFn(pre, CmpLT, FIU)
    GDCC_BC_CodeTypeSwitchFn(pre, CmpNE, FIU)
-
-   GDCC_BC_CodeTypeSwitchFn(put, CmpEQ, FIU)
-   GDCC_BC_CodeTypeSwitchFn(put, CmpGE, FIU)
-   GDCC_BC_CodeTypeSwitchFn(put, CmpGT, FIU)
-   GDCC_BC_CodeTypeSwitchFn(put, CmpLE, FIU)
-   GDCC_BC_CodeTypeSwitchFn(put, CmpLT, FIU)
-   GDCC_BC_CodeTypeSwitchFn(put, CmpNE, FIU)
-
-   GDCC_BC_CodeTypeSwitchFn(tr, CmpEQ, FIU)
-   GDCC_BC_CodeTypeSwitchFn(tr, CmpNE, FIU)
 
    //
    // Info::addFunc_Cmp_UW1
@@ -98,21 +88,47 @@ namespace GDCC::BC::ZDACS
    //
    void Info::genStmnt_CmpEQ_U()
    {
+      genStmnt_CmpEQ_U(Code::CmpU_EQ, Code::BAnd, IR::CodeBase::CmpEQ+'U');
+   }
+
+   //
+   // Info::genStmnt_CmpEQ_U
+   //
+   void Info::genStmnt_CmpEQ_U(Code codeCmp, Code codeAnd, IR::Code codeCall)
+   {
       auto n = getStmntSize();
 
-      if(n == 0) return;
+      if(n <= 1)
+         return genStmntArgR1(codeCmp == Code::CmpU_EQ, codeCall, codeCmp);
 
-      if(stmnt->args[1].a != IR::ArgBase::Stk ||
-         stmnt->args[1].a != IR::ArgBase::Stk)
+      genStmntArgR1Pre(false);
+
+      if(stmnt->args[1].a != IR::ArgBase::Stk)
       {
-         numChunkCODE += n * 8 - 4 +
-            lenPushArg(stmnt->args[1], 0, n) +
-            lenPushArg(stmnt->args[2], 0, n);
+         genStmntPushArg(stmnt->args[1], 0);
+         genStmntPushArg(stmnt->args[2], 0);
+         genCode(codeCmp);
+
+         for(Core::FastU i = 1; i != n; ++i)
+         {
+            genStmntPushArg(stmnt->args[1], i);
+            genStmntPushArg(stmnt->args[2], i);
+            genCode(codeCmp);
+            genCode(codeAnd);
+         }
       }
-      else if(n == 1)
-         numChunkCODE += 4;
       else
-         genStmntCall(1);
+         genStmntCall(getFuncName(codeCall, n), IR::Arg_Stk{1});
+
+      genStmntArgR1Suf();
+   }
+
+   //
+   // Info::genStmnt_CmpNE_U
+   //
+   void Info::genStmnt_CmpNE_U()
+   {
+      genStmnt_CmpEQ_U(Code::CmpU_NE, Code::BOrI, IR::CodeBase::CmpNE+'U');
    }
 
    //
@@ -129,63 +145,6 @@ namespace GDCC::BC::ZDACS
          addFunc_Cmp_UW1(stmnt->code.base);
       else
          (this->*add)(n);
-   }
-
-   //
-   // Info::putStmnt_CmpEQ_U
-   //
-   void Info::putStmnt_CmpEQ_U()
-   {
-      putStmnt_CmpEQ_U(Code::CmpU_EQ, Code::BAnd, IR::CodeBase::CmpEQ+'U');
-   }
-
-   //
-   // Info::putStmnt_CmpEQ_U
-   //
-   void Info::putStmnt_CmpEQ_U(Code codeCmp, Code codeAnd, IR::Code codeCall)
-   {
-      auto n = getStmntSize();
-
-      if(n == 0) return;
-
-      if(stmnt->args[1].a != IR::ArgBase::Stk ||
-         stmnt->args[1].a != IR::ArgBase::Stk)
-      {
-         putStmntPushArg(stmnt->args[1], 0);
-         putStmntPushArg(stmnt->args[2], 0);
-         putCode(codeCmp);
-
-         for(Core::FastU i = 1; i != n; ++i)
-         {
-            putStmntPushArg(stmnt->args[1], i);
-            putStmntPushArg(stmnt->args[2], i);
-            putCode(codeCmp);
-            putCode(codeAnd);
-         }
-      }
-      else if(n == 1)
-         putCode(codeCmp);
-      else
-         putStmntCall(getFuncName(codeCall, n), 1);
-   }
-
-   //
-   // Info::putStmnt_CmpNE_U
-   //
-   void Info::putStmnt_CmpNE_U()
-   {
-      putStmnt_CmpEQ_U(Code::CmpU_NE, Code::BOrI, IR::CodeBase::CmpNE+'U');
-   }
-
-   //
-   // Info::trStmnt_CmpEQ_U
-   //
-   void Info::trStmnt_CmpEQ_U()
-   {
-      if(isPushArg(stmnt->args[1]) && isPushArg(stmnt->args[2]))
-         moveArgStk_dst(stmnt->args[0]);
-      else
-         trStmntStkBin(false);
    }
 }
 
