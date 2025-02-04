@@ -88,6 +88,9 @@ namespace GDCC::SR
       IR::Glyph labelEnd   = {ctx.prog, ctx.fn->genLabel()};
       IR::Glyph labelShort = {ctx.prog, ctx.fn->genLabel()};
 
+      // Push address.
+      GenStmnt_MoveDstPre(exp, ctx, dst);
+
       {
          // Evaluate left operand to stack and store.
 
@@ -111,7 +114,7 @@ namespace GDCC::SR
       ctx.block.addLabel(labelEnd);
 
       // Move to destination.
-      GenStmnt_MovePart(exp, ctx, dst, false, true);
+      GenStmnt_MoveDstSuf(exp, ctx, dst);
    }
 }
 
